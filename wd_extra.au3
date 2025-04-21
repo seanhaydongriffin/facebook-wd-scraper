@@ -6,6 +6,7 @@
 #include <GuiStatusBar.au3>
 #include <Date.au3>
 ;#include "JsonAJ.au3"
+#include "jq.au3"
 
 Global Const $ByCSSSelector = $_WD_LOCATOR_ByCSSSelector
 Global Const $ByXPath = $_WD_LOCATOR_ByXPath

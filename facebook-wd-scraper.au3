@@ -11,10 +11,14 @@
 #include <Array.au3>
 #include "wd_extra.au3"
 
+
+
 Global $app_name = "facebook-wd-scraper"
 Global $ini_filename = $app_name & ".ini"
 
 Global $status_bar_elapsed_timer = -1
+Local $aTimeZone = _Date_Time_GetTimeZoneInformation()
+Local $iOffsetMinutes = -$aTimeZone[1]
 
 
 Global $hGUI = GUICreate($app_name, 1024, 600, -1, -1, -1, $WS_EX_TOPMOST)
@@ -28,7 +32,7 @@ _GUICtrlListView_SetExtendedListViewStyle($visible_listview, BitOR($LVS_EX_GRIDL
 _GUICtrlListView_InsertColumn($visible_listview, 0, "Name", 200)
 _GUICtrlListView_InsertColumn($visible_listview, 1, "Url", 0)
 _GUICtrlListView_InsertColumn($visible_listview, 2, "When", 100)
-_GUICtrlListView_InsertColumn($visible_listview, 3, "Message", 800)
+_GUICtrlListView_InsertColumn($visible_listview, 3, "Message", 2000)
 
 Global $hidden_listview = _GUICtrlListView_Create($hGUI, "", 20, 70, 990, 460)
 WinSetState($hidden_listview, "", @SW_HIDE)
@@ -79,7 +83,8 @@ While 1
 
 				For $i = _GUICtrlListView_GetItemCount($visible_listview) - 1 To 0 Step -1
 					$item_arr = _GUICtrlListView_GetItemTextArray($visible_listview, $i)
-					if GUICtrlRead($past_week_checkbox) = $GUI_CHECKED and StringRegExp($item_arr[3], "\d+[dh]") = False Then
+					;if GUICtrlRead($past_week_checkbox) = $GUI_CHECKED and StringRegExp($item_arr[3], "\d+[dh]") = False Then
+					if GUICtrlRead($past_week_checkbox) = $GUI_CHECKED and (StringInStr($item_arr[3], "wk") > 0 or StringInStr($item_arr[3], "mth") > 0 Or StringInStr($item_arr[3], "yr") > 0) Then
 						_GUICtrlListView_DeleteItem($visible_listview, $i)
 						ContinueLoop
 					EndIf
@@ -130,7 +135,7 @@ While 1
 			UpdateStatusBarAndElapsedTime("creating session ... done")
 
 			$max_pages = _GUICtrlListView_GetItemCount($hidden_listview)
-			ConsoleWrite('@@ Debug(' & @ScriptLineNumber & ') : $max_pages = ' & $max_pages & @CRLF & '>Error code: ' & @error & @CRLF) ;### Debug Console
+			;ConsoleWrite('@@ Debug(' & @ScriptLineNumber & ') : $max_pages = ' & $max_pages & @CRLF & '>Error code: ' & @error & @CRLF) ;### Debug Console
 
 			for $i = 0 to $max_pages - 1
 
@@ -148,22 +153,37 @@ While 1
 
 					UpdateStatusBarAndElapsedTime("finding the post text ...")
 
-					$text2 = FindAndText($ByXPath, "//div[@data-ad-rendering-role='story_message']/../../preceding-sibling::div[1]")
-					ConsoleWrite('@@ Debug(' & @ScriptLineNumber & ') : $text2 = ' & $text2 & @CRLF & '>Error code: ' & @error & @CRLF) ;### Debug Console
-					if StringLen($text2) > 0 Then
-						$text_arr = StringSplit($text2, @LF, $STR_ENTIRESPLIT + $STR_NOCOUNT)
-						_GUICtrlListView_SetItemText($hidden_listview, $i, $text_arr[1], 2)
-						_GUICtrlListView_SetItemText($visible_listview, $i, $text_arr[1], 2)
-						IniWrite(@ScriptDir & "\" & $ini_filename, $item_arr[1], "when", $text_arr[1])
+					;ConsoleWrite('@@ Debug(' & @ScriptLineNumber & ') : $iOffsetMinutes = ' & $iOffsetMinutes & @CRLF & '>Error code: ' & @error & @CRLF) ;### Debug Console
+
+					$source = _WD_GetSource(WDSessionFromPromptRemoteDebuggingPort())
+					$json = ExtractJson($source)
+;					ConsoleWrite('@@ Debug(' & @ScriptLineNumber & ') : $json = ' & $json & @CRLF & '>Error code: ' & @error & @CRLF) ;### Debug Console
+
+					$creation_time = _jqExec($json, '[.. | select(type == "object" and has("creation_time")) | .creation_time] | first')
+					Local $date = _DateAdd('s', Number($creation_time), "1970/01/01 00:00:00")
+					$date = _DateAdd("n", $iOffsetMinutes, $date)
+					$time_ago = TimeAgo($date)
+
+					if StringLen($creation_time) > 0 Then
+						_GUICtrlListView_SetItemText($hidden_listview, $i, $time_ago, 2)
+						_GUICtrlListView_SetItemText($visible_listview, $i, $time_ago, 2)
+						IniWrite(@ScriptDir & "\" & $ini_filename, $item_arr[1], "when", $time_ago)
 					EndIf
 
-					$text = FindAndText($ByXPath, "//div[@data-ad-rendering-role='story_message']")
-					ConsoleWrite('@@ Debug(' & @ScriptLineNumber & ') : $text = ' & $text & @CRLF & '>Error code: ' & @error & @CRLF) ;### Debug Console
-					if StringLen($text2) > 0 Then
+					$text = _jqExec($json, '[.. | select(type == "object" and has("text")) | .text] | first')
+					;ConsoleWrite('@@ Debug(' & @ScriptLineNumber & ') : $text = ' & $text & @CRLF & '>Error code: ' & @error & @CRLF) ;### Debug Console
+
+					if StringLen($text) > 0 Then
 						$text = StringReplace(StringReplace($text, @LF, " "), @CRLF, " ")
 						_GUICtrlListView_SetItemText($hidden_listview, $i, $text, 3)
 						_GUICtrlListView_SetItemText($visible_listview, $i, $text, 3)
-						IniWrite(@ScriptDir & "\" & $ini_filename, $item_arr[1], "message", $text)
+
+						Local $sUTF8Text = StringToBinary($text, 4) ; Convert to UTF-8
+						IniWrite(@ScriptDir & "\" & $ini_filename, $item_arr[1], "message", $sUTF8Text)
+
+;						IniWrite(@ScriptDir & "\" & $ini_filename, $item_arr[1], "message", $text)
+
+
 					EndIf
 
 					UpdateStatusBarAndElapsedTime("finding the post text ... done")
@@ -209,7 +229,13 @@ Func RefreshListviews()
 		$index = _GUICtrlListView_AddItem($visible_listview, $each)
 		_GUICtrlListView_AddSubItem($visible_listview, $index, IniRead(@ScriptDir & "\" & $ini_filename, $each, "url", ""), 1)
 		_GUICtrlListView_AddSubItem($visible_listview, $index, IniRead(@ScriptDir & "\" & $ini_filename, $each, "when", ""), 2)
-		_GUICtrlListView_AddSubItem($visible_listview, $index, IniRead(@ScriptDir & "\" & $ini_filename, $each, "message", ""), 3)
+
+		Local $sDecodedText = BinaryToString(IniRead(@ScriptDir & "\" & $ini_filename, $each, "message", ""), 4) ; Convert back to Unicode
+		_GUICtrlListView_AddSubItem($visible_listview, $index, $sDecodedText, 3)
+
+		;_GUICtrlListView_AddSubItem($visible_listview, $index, IniRead(@ScriptDir & "\" & $ini_filename, $each, "message", ""), 3)
+
+
 	Next
 	_GUICtrlListView_EndUpdate($visible_listview)
 
@@ -219,7 +245,14 @@ Func RefreshListviews()
 		$index = _GUICtrlListView_AddItem($hidden_listview, $each)
 		_GUICtrlListView_AddSubItem($hidden_listview, $index, IniRead(@ScriptDir & "\" & $ini_filename, $each, "url", ""), 1)
 		_GUICtrlListView_AddSubItem($hidden_listview, $index, IniRead(@ScriptDir & "\" & $ini_filename, $each, "when", ""), 2)
-		_GUICtrlListView_AddSubItem($hidden_listview, $index, IniRead(@ScriptDir & "\" & $ini_filename, $each, "message", ""), 3)
+
+
+		Local $sDecodedText = BinaryToString(IniRead(@ScriptDir & "\" & $ini_filename, $each, "message", ""), 4) ; Convert back to Unicode
+		_GUICtrlListView_AddSubItem($hidden_listview, $index, $sDecodedText, 3)
+
+		;_GUICtrlListView_AddSubItem($hidden_listview, $index, IniRead(@ScriptDir & "\" & $ini_filename, $each, "message", ""), 3)
+
+
 	Next
 	_GUICtrlListView_EndUpdate($hidden_listview)
 
@@ -238,4 +271,63 @@ Func UpdateStatusBarAndElapsedTime($message, $part = 1)
 EndFunc
 
 
+Func ExtractJson($sContent)
+    ;Local $sContent = FileRead($sFile) ; Read entire file
+    ;If @error Then Return SetError(1, 0, "")
+
+    ; Find first occurrence of "post_id"
+    Local $iPostIDPos = StringInStr($sContent, '"post_id"', 1)
+    If $iPostIDPos = 0 Then Return SetError(2, 0, "")
+
+    ; Search backward for @LF
+    Local $iLFPos = StringInStr($sContent, @LF, 0, -1, $iPostIDPos)
+    If $iLFPos = 0 Then Return SetError(3, 0, "")
+
+    ; Search forward for '{"require":'
+    Local $iRequirePos = StringInStr($sContent, '{"require":', 1, 1, $iLFPos)
+    If $iRequirePos = 0 Then Return SetError(4, 0, "")
+
+    ; Extract text from '{"require":' to the end of the line
+    Local $iEndOfLinePos = StringInStr($sContent, @LF, 1, 1, $iRequirePos)
+    If $iEndOfLinePos = 0 Then $iEndOfLinePos = StringLen($sContent) ; If no @LF, take full remaining text
+
+    Return StringReplace(StringMid($sContent, $iRequirePos, $iEndOfLinePos - $iRequirePos), "</script>", "")
+EndFunc
+
+Func TimeAgo($sDateTime)
+    Local $sNow = _NowCalc() ; Get current datetime
+    Local $iMinutes = _DateDiff("n", $sDateTime, $sNow)
+    Local $iHours = _DateDiff("h", $sDateTime, $sNow)
+    Local $iDays = _DateDiff("D", $sDateTime, $sNow)
+    Local $iWeeks = _DateDiff("w", $sDateTime, $sNow)
+    Local $iMonths = _DateDiff("M", $sDateTime, $sNow)
+    Local $iYears = _DateDiff("Y", $sDateTime, $sNow)
+
+	Local $mins = "mins"
+	Local $hrs = "hrs"
+	Local $days = "days"
+	Local $wks = "wks"
+	Local $mths = "mths"
+	Local $yrs = "yrs"
+
+    If $iMinutes < 60 Then
+		if $iMinutes = 1 Then $mins = "min"
+        Return $iMinutes & " " & $mins
+    ElseIf $iHours < 24 Then
+		if $iHours = 1 Then $hrs = "hr"
+        Return $iHours & " " & $hrs
+    ElseIf $iDays < 7 Then
+		if $iDays = 1 Then $days = "day"
+        Return $iDays & " " & $days
+    ElseIf $iWeeks < 4 Then
+		if $iWeeks = 1 Then $wks = "wk"
+        Return $iWeeks & " " & $wks
+    ElseIf $iMonths < 12 Then
+		if $iMonths = 1 Then $mths = "mth"
+        Return $iMonths & " " & $mths
+    Else
+		if $iYears = 1 Then $yrs = "yr"
+        Return $iYears & " " & $yrs
+    EndIf
+EndFunc
 
