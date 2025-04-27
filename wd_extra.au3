@@ -8,6 +8,10 @@
 ;#include "JsonAJ.au3"
 #include "jq.au3"
 
+Global $app_name = "facebook-wd-scraper"
+Global $ini_filename = $app_name & ".ini"
+
+
 Global Const $ByCSSSelector = $_WD_LOCATOR_ByCSSSelector
 Global Const $ByXPath = $_WD_LOCATOR_ByXPath
 Global Const $ByLinkText = $_WD_LOCATOR_ByLinkText
@@ -18,6 +22,10 @@ Global Const $debug_text_size = 200
 Global $hStatus
 Global $ini_filename
 Global $prompt
+Global $_WD_REMOTE_DEBUG_PORT
+
+
+
 
 Func CreateSession($headless = False, $remote_debugging_port = 0, $debug_flag = 0)
 	; running chrome with:
@@ -25,11 +33,13 @@ Func CreateSession($headless = False, $remote_debugging_port = 0, $debug_flag = 
 	;Local $remote_debugging_port = 9222
 	;Local $remote_debugging_port = 8674
 
-	Local $_remote_debugging_port = $remote_debugging_port
-	;if $_remote_debugging_port = 0 Then $_remote_debugging_port = IniRead($ini_filename, $prompt, "RemoteDebuggingPort", 8674)
-	if $_remote_debugging_port = 0 Then $_remote_debugging_port = IniRead($ini_filename, "Main", "RemoteDebuggingPort", 8674)
+	$_WD_REMOTE_DEBUG_PORT = $remote_debugging_port
 
-	Local $_web_driver_pid_port_session = StringRegExp(IniRead($ini_filename, "Main", "RemoteDebuggingPort" & $_remote_debugging_port, "WebDriverPIDPort9515Session0"), "WebDriverPID(.*?)Port(.*?)Session(.*)", 1)
+	;Local $_remote_debugging_port = $remote_debugging_port
+	;if $_remote_debugging_port = 0 Then $_remote_debugging_port = IniRead($ini_filename, $prompt, "RemoteDebuggingPort", 8674)
+	;if $_remote_debugging_port = 0 Then $_remote_debugging_port = IniRead($ini_filename, "Main", "RemoteDebuggingPort", 8674)
+
+	Local $_web_driver_pid_port_session = StringRegExp(IniRead($ini_filename, "Main", "RemoteDebuggingPort" & $_WD_REMOTE_DEBUG_PORT, "WebDriverPIDPort9515Session0"), "WebDriverPID(.*?)Port(.*?)Session(.*)", 1)
 	$_WD_PORT = $_web_driver_pid_port_session[1]
 
 	; close any chromedrivers that:
@@ -60,6 +70,7 @@ Func CreateSession($headless = False, $remote_debugging_port = 0, $debug_flag = 
 		_WD_CapabilitiesAdd('binary', IniRead($ini_filename, "Main", "BrowserBinary", "C:\Users\sgriffin\.cache\selenium\chrome\win64\117.0.5938.149\chrome.exe"))
 		_WD_CapabilitiesAdd('prefs', 'credentials_enable_service', False)
 		;_WD_CapabilitiesAdd('args', '--remote-debugging-port=' & $_remote_debugging_port & ' --headless')
+		_WD_CapabilitiesAdd('args', '--incognito')
 
 		if $headless = True Then _WD_CapabilitiesAdd('args', '--headless')
 
@@ -68,7 +79,7 @@ Func CreateSession($headless = False, $remote_debugging_port = 0, $debug_flag = 
 			ShowDebug($debug_flag, "Creating the browser ... Error. See chrome.log")
 			Return
 		EndIf
-		IniWrite($ini_filename, "Main", "RemoteDebuggingPort" & $_remote_debugging_port, "WebDriverPID" & $iWebDriverPID & "Port" & $_web_driver_pid_port_session[1] & "Session" & $_web_driver_pid_port_session[2])
+		IniWrite($ini_filename, "Main", "RemoteDebuggingPort" & $_WD_REMOTE_DEBUG_PORT, "WebDriverPID" & $iWebDriverPID & "Port" & $_web_driver_pid_port_session[1] & "Session" & $_web_driver_pid_port_session[2])
 
 		Local $s_Capabilities = _WD_CapabilitiesGet()
 		Local $wd_session = _WD_CreateSession($s_Capabilities)
@@ -76,25 +87,25 @@ Func CreateSession($headless = False, $remote_debugging_port = 0, $debug_flag = 
 			ShowDebug($debug_flag, "Creating the browser ... Error. See chrome.log")
 			Return
 		EndIf
-		IniWrite($ini_filename, "Main", "RemoteDebuggingPort" & $_remote_debugging_port, "WebDriverPID" & $iWebDriverPID & "Port" & $_web_driver_pid_port_session[1] & "Session" & $wd_session)
+		IniWrite($ini_filename, "Main", "RemoteDebuggingPort" & $_WD_REMOTE_DEBUG_PORT, "WebDriverPID" & $iWebDriverPID & "Port" & $_web_driver_pid_port_session[1] & "Session" & $wd_session)
 
 		ShowDebug($debug_flag, "Creating the browser ... Done")
 	;EndIf
 EndFunc
 
 
-Func AttachSession($remote_debugging_port = 0, $debug_flag = 0)
+Func AttachSession($debug_flag = 0)
 	;MsgBox(0, "WebAssist AI", "AttachSession")
 	; running chrome with:
 	; chrome.exe --remote-debugging-port=9222
 	;Local $remote_debugging_port = 9222
 	;Local $remote_debugging_port = 8674
 
-	Local $_remote_debugging_port = $remote_debugging_port
+	;Local $_remote_debugging_port = $remote_debugging_port
 	;if $_remote_debugging_port = 0 Then $_remote_debugging_port = IniRead($ini_filename, $prompt, "RemoteDebuggingPort", 8674)
-	if $_remote_debugging_port = 0 Then $_remote_debugging_port = IniRead($ini_filename, "Main", "RemoteDebuggingPort", 8674)
+	;if $_remote_debugging_port = 0 Then $_remote_debugging_port = IniRead($ini_filename, "Main", "RemoteDebuggingPort", 8674)
 
-	Local $_web_driver_pid_port_session = StringRegExp(IniRead($ini_filename, "Main", "RemoteDebuggingPort" & $_remote_debugging_port, "WebDriverPIDPort9515Session0"), "WebDriverPID(.*?)Port(.*?)Session(.*)", 1)
+	Local $_web_driver_pid_port_session = StringRegExp(IniRead($ini_filename, "Main", "RemoteDebuggingPort" & $_WD_REMOTE_DEBUG_PORT, "WebDriverPIDPort9515Session0"), "WebDriverPID(.*?)Port(.*?)Session(.*)", 1)
 	$_WD_PORT = $_web_driver_pid_port_session[1]
 
 	if StringLen($_web_driver_pid_port_session[2]) > 0 Then
@@ -111,7 +122,7 @@ Func AttachSession($remote_debugging_port = 0, $debug_flag = 0)
 		_WD_CapabilitiesAdd('firstMatch', 'chrome')
 		_WD_CapabilitiesAdd('w3c', True)
 		_WD_CapabilitiesAdd('binary', IniRead($ini_filename, "Main", "BrowserBinary", ""))
-		_WD_CapabilitiesAdd('debuggerAddress', '127.0.0.1:' & $_remote_debugging_port)
+		_WD_CapabilitiesAdd('debuggerAddress', '127.0.0.1:' & $_WD_REMOTE_DEBUG_PORT)
 		_WD_CapabilitiesDump(@ScriptLineNumber & ' :WebDriver:Capabilities:')
 
 		Local $iWebDriverPID = _WD_Startup()
@@ -119,7 +130,7 @@ Func AttachSession($remote_debugging_port = 0, $debug_flag = 0)
 			ShowDebug($debug_flag, "Attaching to the browser ... Error. See chrome.log")
 			Return
 		EndIf
-		IniWrite($ini_filename, "Main", "RemoteDebuggingPort" & $_remote_debugging_port, "WebDriverPID" & $iWebDriverPID & "Port" & $_web_driver_pid_port_session[1] & "Session" & $_web_driver_pid_port_session[2])
+		IniWrite($ini_filename, "Main", "RemoteDebuggingPort" & $_WD_REMOTE_DEBUG_PORT, "WebDriverPID" & $iWebDriverPID & "Port" & $_web_driver_pid_port_session[1] & "Session" & $_web_driver_pid_port_session[2])
 
 		Local $s_Capabilities = _WD_CapabilitiesGet()
 		Local $wd_session = _WD_CreateSession($s_Capabilities)
@@ -128,7 +139,7 @@ Func AttachSession($remote_debugging_port = 0, $debug_flag = 0)
 			ShowDebug($debug_flag, "Attaching to the browser ... Error. See chrome.log")
 			Return
 		EndIf
-		IniWrite($ini_filename, "Main", "RemoteDebuggingPort" & $_remote_debugging_port, "WebDriverPID" & $iWebDriverPID & "Port" & $_web_driver_pid_port_session[1] & "Session" & $wd_session)
+		IniWrite($ini_filename, "Main", "RemoteDebuggingPort" & $_WD_REMOTE_DEBUG_PORT, "WebDriverPID" & $iWebDriverPID & "Port" & $_web_driver_pid_port_session[1] & "Session" & $wd_session)
 
 		ShowDebug($debug_flag, "Attaching to the browser ... Done")
 	EndIf
@@ -266,13 +277,8 @@ EndFunc
 
 
 
-Func WDSessionFromPromptRemoteDebuggingPort($remote_debugging_port = 0)
-	Local $_remote_debugging_port = $remote_debugging_port
-	;if $_remote_debugging_port = 0 Then $_remote_debugging_port = IniRead($ini_filename, $prompt, "RemoteDebuggingPort", 8674)
-	if $_remote_debugging_port = 0 Then $_remote_debugging_port = IniRead($ini_filename, "Main", "RemoteDebuggingPort", 8674)
-
-	Local $_web_driver_pid_port_session = StringRegExp(IniRead($ini_filename, "Main", "RemoteDebuggingPort" & $_remote_debugging_port, "WebDriverPIDPort9515Session0"), "WebDriverPID(.*?)Port(.*?)Session(.*)", 1)
-	$_WD_PORT = $_web_driver_pid_port_session[1]
+Func WDSessionFromPromptRemoteDebuggingPort()
+	Local $_web_driver_pid_port_session = StringRegExp(IniRead($ini_filename, "Main", "RemoteDebuggingPort" & $_WD_REMOTE_DEBUG_PORT, "WebDriverPIDPort9515Session0"), "WebDriverPID(.*?)Port(.*?)Session(.*)", 1)
 	Return $_web_driver_pid_port_session[2]
 EndFunc
 

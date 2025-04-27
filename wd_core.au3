@@ -305,7 +305,9 @@ Func _WD_CreateSession($sCapabilities = Default)
 
 	$_WD_SESSION_DETAILS = '' ; resetting saved response details before making new request
 	Local $sResponse = __WD_Post($_WD_BASE_URL & ":" & $_WD_PORT & "/session", $sCapabilities)
-;	ConsoleWrite('@@ Debug(' & @ScriptLineNumber & ') : $sResponse = ' & $sResponse & @CRLF & '>Error code: ' & @error & @CRLF) ;### Debug Console
+	ConsoleWrite('@@ Debug(' & @ScriptLineNumber & ') : $_WD_BASE_URL & ":" & $_WD_PORT & "/session" = ' & $_WD_BASE_URL & ":" & $_WD_PORT & "/session" & @CRLF & '>Error code: ' & @error & @CRLF) ;### Debug Console
+	ConsoleWrite('@@ Debug(' & @ScriptLineNumber & ') : $sCapabilities = ' & $sCapabilities & @CRLF & '>Error code: ' & @error & @CRLF) ;### Debug Console
+	ConsoleWrite('@@ Debug(' & @ScriptLineNumber & ') : $sResponse = ' & $sResponse & @CRLF & '>Error code: ' & @error & @CRLF) ;### Debug Console
 	Local $iErr = @error
 	Local $oJSON = Json_Decode($sResponse)
 

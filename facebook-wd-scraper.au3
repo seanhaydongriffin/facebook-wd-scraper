@@ -13,8 +13,10 @@
 
 
 
-Global $app_name = "facebook-wd-scraper"
-Global $ini_filename = $app_name & ".ini"
+
+
+
+
 
 Global $status_bar_elapsed_timer = -1
 Local $aTimeZone = _Date_Time_GetTimeZoneInformation()
@@ -26,6 +28,7 @@ Global $hGUI = GUICreate($app_name, 1024, 600, -1, -1, -1, $WS_EX_TOPMOST)
 Global $past_week_checkbox = GUICtrlCreateCheckbox("Past Week", 20, 40, 80, 20)
 Global $free_checkbox = GUICtrlCreateCheckbox("Free", 110, 40, 80, 20)
 Global $half_checkbox = GUICtrlCreateCheckbox("Half", 200, 40, 80, 20)
+Global $special_checkbox = GUICtrlCreateCheckbox("Special", 290, 40, 80, 20)
 
 Global $visible_listview = _GUICtrlListView_Create($hGUI, "", 20, 70, 990, 460)
 _GUICtrlListView_SetExtendedListViewStyle($visible_listview, BitOR($LVS_EX_GRIDLINES, $LVS_EX_FULLROWSELECT, $LVS_EX_SUBITEMIMAGES))
@@ -65,13 +68,14 @@ While 1
 	$iMsg = GUIGetMsg(1)
 	Switch $iMsg[0]
 
-		Case $past_week_checkbox, $free_checkbox, $half_checkbox
+		Case $past_week_checkbox, $free_checkbox, $half_checkbox, $special_checkbox
 			_GUICtrlListView_BeginUpdate($visible_listview)
 			_GUICtrlListView_DeleteAllItems($visible_listview)
 
 			If GUICtrlRead($past_week_checkbox) = $GUI_CHECKED or _
 				GUICtrlRead($free_checkbox) = $GUI_CHECKED Or _
-				GUICtrlRead($half_checkbox) = $GUI_CHECKED Then
+				GUICtrlRead($half_checkbox) = $GUI_CHECKED Or _
+				GUICtrlRead($special_checkbox) = $GUI_CHECKED Then
 
 				for $i = 0 to _GUICtrlListView_GetItemCount($hidden_listview) - 1
 					$item_arr = _GUICtrlListView_GetItemTextArray($hidden_listview, $i)
@@ -96,13 +100,19 @@ While 1
 						_GUICtrlListView_DeleteItem($visible_listview, $i)
 						ContinueLoop
 					EndIf
+					if GUICtrlRead($special_checkbox) = $GUI_CHECKED and StringInStr($item_arr[4], "special") = 0 Then
+						_GUICtrlListView_DeleteItem($visible_listview, $i)
+						ContinueLoop
+					EndIf
+					ConsoleWrite('@@ Debug(' & @ScriptLineNumber & ') : $item_arr[4] = ' & $item_arr[4] & @CRLF & '>Error code: ' & @error & @CRLF) ;### Debug Console
 				Next
 
 			EndIf
 
 			If GUICtrlRead($past_week_checkbox) = $GUI_UNCHECKED And _
 				GUICtrlRead($free_checkbox) = $GUI_UNCHECKED And _
-				GUICtrlRead($half_checkbox) = $GUI_UNCHECKED Then
+				GUICtrlRead($half_checkbox) = $GUI_UNCHECKED And _
+				GUICtrlRead($special_checkbox) = $GUI_UNCHECKED Then
 				for $i = 0 to _GUICtrlListView_GetItemCount($hidden_listview) - 1
 					$item_arr = _GUICtrlListView_GetItemTextArray($hidden_listview, $i)
 					$index = _GUICtrlListView_AddItem($visible_listview, $item_arr[1])
@@ -118,84 +128,57 @@ While 1
 
 			GUICtrlSetState($past_week_checkbox, $GUI_UNCHECKED)
 			GUICtrlSetState($free_checkbox, $GUI_UNCHECKED)
-			RefreshListviews()
 
 			if GUICtrlRead($refresh_pages_no_posts_checkbox) = $GUI_UNCHECKED Then
-				_GUICtrlListView_BeginUpdate($visible_listview)
-				for $i = 0 to _GUICtrlListView_GetItemCount($visible_listview) - 1
-					_GUICtrlListView_SetItemText($visible_listview, $i, "", 2)
-					_GUICtrlListView_SetItemText($visible_listview, $i, "", 3)
+				; clear the when and messages for all facebook pages in the ini file
+				Global $saved_pages_arr = IniReadSectionNames(@ScriptDir & "\" & $ini_filename)
+				_ArrayDelete($saved_pages_arr, 0)
+				_ArrayDelete($saved_pages_arr, _ArraySearch($saved_pages_arr, "Main"))
+				_ArraySort($saved_pages_arr)
+				for $each in $saved_pages_arr
+					IniWrite(@ScriptDir & "\" & $ini_filename, $each, "when", "")
+					IniWrite(@ScriptDir & "\" & $ini_filename, $each, "message", "")
 				Next
-				_GUICtrlListView_EndUpdate($visible_listview)
 			EndIf
 
-			$status_bar_elapsed_timer = TimerInit()
-			UpdateStatusBarAndElapsedTime("creating session ...")
-			CreateSession(True, 8674)
-			UpdateStatusBarAndElapsedTime("creating session ... done")
+			;msgbox(0, "", "")
 
-			$max_pages = _GUICtrlListView_GetItemCount($hidden_listview)
-			;ConsoleWrite('@@ Debug(' & @ScriptLineNumber & ') : $max_pages = ' & $max_pages & @CRLF & '>Error code: ' & @error & @CRLF) ;### Debug Console
-
-			for $i = 0 to $max_pages - 1
-
-				UpdateStatusBarAndElapsedTime("FB page " & ($i + 1) & " of " & $max_pages, 0)
-
-				$item_arr = _GUICtrlListView_GetItemTextArray($hidden_listview, $i)
-
-				if GUICtrlRead($refresh_pages_no_posts_checkbox) = $GUI_UNCHECKED Or (GUICtrlRead($refresh_pages_no_posts_checkbox) = $GUI_CHECKED And StringLen($item_arr[3]) = 0) Then
-
-					ShowDebug(0, $item_arr[1])
-
-					UpdateStatusBarAndElapsedTime("navigating to page " & $item_arr[2] & " ...")
-					Navigate($item_arr[2])
-					UpdateStatusBarAndElapsedTime("navigating to page " & $item_arr[2] & " ... done")
-
-					UpdateStatusBarAndElapsedTime("finding the post text ...")
-
-					;ConsoleWrite('@@ Debug(' & @ScriptLineNumber & ') : $iOffsetMinutes = ' & $iOffsetMinutes & @CRLF & '>Error code: ' & @error & @CRLF) ;### Debug Console
-
-					$source = _WD_GetSource(WDSessionFromPromptRemoteDebuggingPort())
-					$json = ExtractJson($source)
-;					ConsoleWrite('@@ Debug(' & @ScriptLineNumber & ') : $json = ' & $json & @CRLF & '>Error code: ' & @error & @CRLF) ;### Debug Console
-
-					$creation_time = _jqExec($json, '[.. | select(type == "object" and has("creation_time")) | .creation_time] | first')
-					Local $date = _DateAdd('s', Number($creation_time), "1970/01/01 00:00:00")
-					$date = _DateAdd("n", $iOffsetMinutes, $date)
-					$time_ago = TimeAgo($date)
-
-					if StringLen($creation_time) > 0 Then
-						_GUICtrlListView_SetItemText($hidden_listview, $i, $time_ago, 2)
-						_GUICtrlListView_SetItemText($visible_listview, $i, $time_ago, 2)
-						IniWrite(@ScriptDir & "\" & $ini_filename, $item_arr[1], "when", $time_ago)
-					EndIf
-
-					$text = _jqExec($json, '[.. | select(type == "object" and has("text")) | .text] | first')
-					;ConsoleWrite('@@ Debug(' & @ScriptLineNumber & ') : $text = ' & $text & @CRLF & '>Error code: ' & @error & @CRLF) ;### Debug Console
-
-					if StringLen($text) > 0 Then
-						$text = StringReplace(StringReplace($text, @LF, " "), @CRLF, " ")
-						_GUICtrlListView_SetItemText($hidden_listview, $i, $text, 3)
-						_GUICtrlListView_SetItemText($visible_listview, $i, $text, 3)
-
-						Local $sUTF8Text = StringToBinary($text, 4) ; Convert to UTF-8
-						IniWrite(@ScriptDir & "\" & $ini_filename, $item_arr[1], "message", $sUTF8Text)
-
-;						IniWrite(@ScriptDir & "\" & $ini_filename, $item_arr[1], "message", $text)
+			;Exit
 
 
-					EndIf
+			; update the listviews with the ini file data
+			RefreshListviews()
 
-					UpdateStatusBarAndElapsedTime("finding the post text ... done")
-				EndIf
-			Next
+			; start a mutex to control the agents
+			$mutex_handle = _WinAPI_CreateMutex($app_name)
+			_WinAPI_ReleaseMutex($mutex_handle)
 
-			UpdateStatusBarAndElapsedTime("", 0)
+			Local $pids[0]
 
-			UpdateStatusBarAndElapsedTime("detaching session ...")
-			DetachSession()
-			UpdateStatusBarAndElapsedTime("detaching session ... done")
-			$status_bar_elapsed_timer = -1
+			$pid = Run(@ScriptDir & "\facebook-wd-scraper-agent.exe 8674", @ScriptDir, @SW_MINIMIZE)
+			_ArrayAdd($pids, $pid)
+			$pid = Run(@ScriptDir & "\facebook-wd-scraper-agent.exe 8675", @ScriptDir, @SW_MINIMIZE)
+			_ArrayAdd($pids, $pid)
+			$pid = Run(@ScriptDir & "\facebook-wd-scraper-agent.exe 8676", @ScriptDir, @SW_MINIMIZE)
+			_ArrayAdd($pids, $pid)
+;			$pid = Run(@ScriptDir & "\facebook-wd-scraper-agent.exe 8677", @ScriptDir, @SW_MINIMIZE)
+;			_ArrayAdd($pids, $pid)
+;			$pid = Run(@ScriptDir & "\facebook-wd-scraper-agent.exe 8678", @ScriptDir, @SW_MINIMIZE)
+;			_ArrayAdd($pids, $pid)
+
+			; while agents exist
+			While True
+				Local $agents_exist = False
+				for $pid in $pids
+					if ProcessExists($pid) <> 0 Then $agents_exist = True
+				Next
+				if $agents_exist = False Then ExitLoop
+				sleep(3000)
+				; update the listviews with the ini file data updated by the agents
+				RefreshListviews()
+			WEnd
+
+
 
 		Case $visit_button
 
@@ -231,6 +214,11 @@ Func RefreshListviews()
 		_GUICtrlListView_AddSubItem($visible_listview, $index, IniRead(@ScriptDir & "\" & $ini_filename, $each, "when", ""), 2)
 
 		Local $sDecodedText = BinaryToString(IniRead(@ScriptDir & "\" & $ini_filename, $each, "message", ""), 4) ; Convert back to Unicode
+		$sDecodedText = StringReplace($sDecodedText, @CRLF, " ")
+		$sDecodedText = StringReplace($sDecodedText, @CR, " ")
+		$sDecodedText = StringReplace($sDecodedText, @LF, " ")
+		$sDecodedText = StringReplace($sDecodedText, Chr(10), " ")
+		$sDecodedText = StringRegExpReplace($sDecodedText, "\s+", " ")
 		_GUICtrlListView_AddSubItem($visible_listview, $index, $sDecodedText, 3)
 
 		;_GUICtrlListView_AddSubItem($visible_listview, $index, IniRead(@ScriptDir & "\" & $ini_filename, $each, "message", ""), 3)
@@ -248,6 +236,11 @@ Func RefreshListviews()
 
 
 		Local $sDecodedText = BinaryToString(IniRead(@ScriptDir & "\" & $ini_filename, $each, "message", ""), 4) ; Convert back to Unicode
+		$sDecodedText = StringReplace($sDecodedText, @CRLF, " ")
+		$sDecodedText = StringReplace($sDecodedText, @CR, " ")
+		$sDecodedText = StringReplace($sDecodedText, @LF, " ")
+		$sDecodedText = StringReplace($sDecodedText, Chr(10), " ")
+		$sDecodedText = StringRegExpReplace($sDecodedText, "\s+", " ")
 		_GUICtrlListView_AddSubItem($hidden_listview, $index, $sDecodedText, 3)
 
 		;_GUICtrlListView_AddSubItem($hidden_listview, $index, IniRead(@ScriptDir & "\" & $ini_filename, $each, "message", ""), 3)
