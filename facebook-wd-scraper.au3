@@ -1,6 +1,6 @@
 #include <GUIConstantsEx.au3>
 #include <MsgBoxConstants.au3>
-;#include <EditConstants.au3>
+#include <EditConstants.au3>
 #include <WindowsConstants.au3>
 #include <GuiStatusBar.au3>
 #include <GUIButton.au3>
@@ -14,16 +14,12 @@
 
 
 
-
-
-
-
 Global $status_bar_elapsed_timer = -1
 Local $aTimeZone = _Date_Time_GetTimeZoneInformation()
 Local $iOffsetMinutes = -$aTimeZone[1]
+$hFont = _WinAPI_CreateFont(18, 8, 0, 0, $FW_NORMAL, False, False, False, $DEFAULT_CHARSET, $OUT_DEFAULT_PRECIS, $CLIP_DEFAULT_PRECIS, $DEFAULT_QUALITY, 0, "Arial")
 
-
-Global $hGUI = GUICreate($app_name, 1024, 600, -1, -1, -1, $WS_EX_TOPMOST)
+Global $hGUI = GUICreate($app_name, 1024, 800, -1, -1, -1, $WS_EX_TOPMOST)
 
 Global $past_week_checkbox = GUICtrlCreateCheckbox("Past Week", 20, 40, 80, 20)
 Global $free_checkbox = GUICtrlCreateCheckbox("Free", 110, 40, 80, 20)
@@ -36,6 +32,7 @@ _GUICtrlListView_InsertColumn($visible_listview, 0, "Name", 200)
 _GUICtrlListView_InsertColumn($visible_listview, 1, "Url", 0)
 _GUICtrlListView_InsertColumn($visible_listview, 2, "When", 100)
 _GUICtrlListView_InsertColumn($visible_listview, 3, "Message", 2000)
+_WinAPI_SetFont($visible_listview, $hFont, True)
 
 Global $hidden_listview = _GUICtrlListView_Create($hGUI, "", 20, 70, 990, 460)
 WinSetState($hidden_listview, "", @SW_HIDE)
@@ -44,9 +41,12 @@ _GUICtrlListView_InsertColumn($hidden_listview, 1, "Url", 0)
 _GUICtrlListView_InsertColumn($hidden_listview, 2, "When", 100)
 _GUICtrlListView_InsertColumn($hidden_listview, 3, "Message", 800)
 
-Global $refresh_button = GUICtrlCreateButton("Refresh", 20, 550, 80, 20)
-Global $visit_button = GUICtrlCreateButton("Visit", 110, 550, 80, 20)
-Global $refresh_pages_no_posts_checkbox = GUICtrlCreateCheckbox("Refresh pages with no posts", 200, 550, 160, 20)
+Global $detail_edit = GUICtrlCreateEdit("", 20, 550, 990, 180, BitOR($ES_MULTILINE, $ES_AUTOVSCROLL, $ES_WANTRETURN))
+GUICtrlSetFont(-1, 12)
+
+Global $refresh_button = GUICtrlCreateButton("Refresh", 20, 750, 80, 20)
+Global $visit_button = GUICtrlCreateButton("Visit", 110, 750, 80, 20)
+Global $refresh_pages_no_posts_checkbox = GUICtrlCreateCheckbox("Refresh pages with no posts", 200, 750, 160, 20)
 
 $hStatus = _GUICtrlStatusBar_Create($hGUI)
 Local $aParts[4] = [100, 590, 640]
@@ -62,6 +62,7 @@ RefreshListviews()
 
 GUISetState(@SW_SHOW, $hGUI)
 
+GUIRegisterMsg($WM_NOTIFY, "WM_NOTIFY")
 
 Local $iMsg = 0
 While 1
@@ -195,6 +196,33 @@ WEnd
 
 GUIDelete($hGUI)
 
+
+Func WM_NOTIFY($hWnd, $iMsg, $wParam, $lParam)
+        #forceref $hWnd, $iMsg, $wParam
+        Local $hWndListView = $visible_listview
+        If Not IsHWnd($visible_listview) Then $hWndListView = GUICtrlGetHandle($visible_listview)
+
+        Local $tNMHDR = DllStructCreate($tagNMHDR, $lParam)
+        Local $hWndFrom = HWnd(DllStructGetData($tNMHDR, "hWndFrom"))
+        Local $iCode = DllStructGetData($tNMHDR, "Code")
+        Switch $hWndFrom
+                Case $hWndListView
+                        Switch $iCode
+                              Case $LVN_ITEMCHANGED ; An item has changed
+								  ConsoleWrite('@@ Debug(' & @ScriptLineNumber & ') : $LVN_ITEMCHANGED = ' & $LVN_ITEMCHANGED & @CRLF & '>Error code: ' & @error & @CRLF) ;### Debug Console
+
+								  $arr = _GUICtrlListView_GetItemTextArray($visible_listview)
+								  if $arr[0] > 0 Then
+									GUICtrlSetData($detail_edit, $arr[4])
+									;ConsoleWrite('@@ Debug(' & @ScriptLineNumber & ') : $arr[3] = ' & $arr[3] & @CRLF & '>Error code: ' & @error & @CRLF) ;### Debug Console
+								EndIf
+
+;                                      _WM_NOTIFY_DebugEvent("$LVN_ITEMCHANGED", $tagNMLISTVIEW, $lParam, "IDFrom,,Item,SubItem,NewState,OldState,Changed,ActionX,ActionY,Param")
+                                      ; No return value
+                        EndSwitch
+        EndSwitch
+        Return $GUI_RUNDEFMSG
+EndFunc   ;==>WM_NOTIFY
 
 
 Func RefreshListviews()
