@@ -22,8 +22,8 @@ Global Const $debug_text_size = 200
 Global $hStatus
 Global $ini_filename
 Global $prompt
-Global $_WD_REMOTE_DEBUG_PORT
-
+Global $_WD_REMOTE_DEBUG_PORT = 0
+Global $mutex_handle
 
 
 
@@ -348,4 +348,30 @@ Func WDCloseDriversWithNoBrowsers()
 			ProcessWaitClose($pid, 5)
 		EndIf
 	Next
+EndFunc
+
+Func ConnectToMutexHandler()
+	$mutex_handle = _WinAPI_OpenMutex($app_name)
+	if $mutex_handle = 0 then
+		ConsoleWrite("No mutex found, exiting." & @CRLF)
+		Exit
+	EndIf
+	ConsoleWrite("Mutex found." & @CRLF)
+EndFunc
+
+Func WaitForMutex()
+	$mutex_event = _WinAPI_WaitForSingleObject($mutex_handle, 20000)
+	;ConsoleWrite('@@ Debug(' & @ScriptLineNumber & ') : $mutex_event = ' & $mutex_event & @CRLF & '>Error code: ' & @error & @CRLF) ;### Debug Console
+	if $mutex_event <> 0 then
+		ConsoleWrite("Could not get the mutex, exiting." & @CRLF)
+		return False
+		;ExitLoop
+	EndIf
+	ConsoleWrite("Got the mutex." & @CRLF)
+	Return True
+EndFunc
+
+Func ReleaseTheMutex()
+	$result = _WinAPI_ReleaseMutex($mutex_handle)
+	ConsoleWrite("Released the mutex." & @CRLF)
 EndFunc

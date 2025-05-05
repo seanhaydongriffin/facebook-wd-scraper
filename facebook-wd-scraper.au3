@@ -10,8 +10,8 @@
 #include <GuiListView.au3>
 #include <Array.au3>
 #include "wd_extra.au3"
-
-
+#include "Curl.au3"
+#include "Json.au3"
 
 
 Global $status_bar_elapsed_timer = -1
@@ -25,6 +25,7 @@ Global $past_week_checkbox = GUICtrlCreateCheckbox("Past Week", 20, 40, 80, 20)
 Global $free_checkbox = GUICtrlCreateCheckbox("Free", 110, 40, 80, 20)
 Global $half_checkbox = GUICtrlCreateCheckbox("Half", 200, 40, 80, 20)
 Global $special_checkbox = GUICtrlCreateCheckbox("Special", 290, 40, 80, 20)
+Global $offer_checkbox = GUICtrlCreateCheckbox("Offer", 380, 40, 80, 20)
 
 Global $visible_listview = _GUICtrlListView_Create($hGUI, "", 20, 70, 990, 460)
 _GUICtrlListView_SetExtendedListViewStyle($visible_listview, BitOR($LVS_EX_GRIDLINES, $LVS_EX_FULLROWSELECT, $LVS_EX_SUBITEMIMAGES))
@@ -47,6 +48,7 @@ GUICtrlSetFont(-1, 12)
 Global $refresh_button = GUICtrlCreateButton("Refresh", 20, 750, 80, 20)
 Global $visit_button = GUICtrlCreateButton("Visit", 110, 750, 80, 20)
 Global $refresh_pages_no_posts_checkbox = GUICtrlCreateCheckbox("Refresh pages with no posts", 200, 750, 160, 20)
+Global $send_to_sheets_button = GUICtrlCreateButton("Send To Sheets", 370, 750, 100, 20)
 
 $hStatus = _GUICtrlStatusBar_Create($hGUI)
 Local $aParts[4] = [100, 590, 640]
@@ -62,6 +64,7 @@ RefreshListviews()
 
 GUISetState(@SW_SHOW, $hGUI)
 
+
 GUIRegisterMsg($WM_NOTIFY, "WM_NOTIFY")
 
 Local $iMsg = 0
@@ -69,14 +72,15 @@ While 1
 	$iMsg = GUIGetMsg(1)
 	Switch $iMsg[0]
 
-		Case $past_week_checkbox, $free_checkbox, $half_checkbox, $special_checkbox
+		Case $past_week_checkbox, $free_checkbox, $half_checkbox, $special_checkbox, $offer_checkbox
 			_GUICtrlListView_BeginUpdate($visible_listview)
 			_GUICtrlListView_DeleteAllItems($visible_listview)
 
 			If GUICtrlRead($past_week_checkbox) = $GUI_CHECKED or _
 				GUICtrlRead($free_checkbox) = $GUI_CHECKED Or _
 				GUICtrlRead($half_checkbox) = $GUI_CHECKED Or _
-				GUICtrlRead($special_checkbox) = $GUI_CHECKED Then
+				GUICtrlRead($special_checkbox) = $GUI_CHECKED Or _
+				GUICtrlRead($offer_checkbox) = $GUI_CHECKED Then
 
 				for $i = 0 to _GUICtrlListView_GetItemCount($hidden_listview) - 1
 					$item_arr = _GUICtrlListView_GetItemTextArray($hidden_listview, $i)
@@ -105,6 +109,10 @@ While 1
 						_GUICtrlListView_DeleteItem($visible_listview, $i)
 						ContinueLoop
 					EndIf
+					if GUICtrlRead($offer_checkbox) = $GUI_CHECKED and StringInStr($item_arr[4], "offer") = 0 Then
+						_GUICtrlListView_DeleteItem($visible_listview, $i)
+						ContinueLoop
+					EndIf
 					ConsoleWrite('@@ Debug(' & @ScriptLineNumber & ') : $item_arr[4] = ' & $item_arr[4] & @CRLF & '>Error code: ' & @error & @CRLF) ;### Debug Console
 				Next
 
@@ -113,7 +121,8 @@ While 1
 			If GUICtrlRead($past_week_checkbox) = $GUI_UNCHECKED And _
 				GUICtrlRead($free_checkbox) = $GUI_UNCHECKED And _
 				GUICtrlRead($half_checkbox) = $GUI_UNCHECKED And _
-				GUICtrlRead($special_checkbox) = $GUI_UNCHECKED Then
+				GUICtrlRead($special_checkbox) = $GUI_UNCHECKED And _
+				GUICtrlRead($offer_checkbox) = $GUI_UNCHECKED Then
 				for $i = 0 to _GUICtrlListView_GetItemCount($hidden_listview) - 1
 					$item_arr = _GUICtrlListView_GetItemTextArray($hidden_listview, $i)
 					$index = _GUICtrlListView_AddItem($visible_listview, $item_arr[1])
@@ -129,23 +138,37 @@ While 1
 
 			GUICtrlSetState($past_week_checkbox, $GUI_UNCHECKED)
 			GUICtrlSetState($free_checkbox, $GUI_UNCHECKED)
+			Global $saved_pages_arr = IniReadSectionNames(@ScriptDir & "\" & $ini_filename)
+			_ArrayDelete($saved_pages_arr, 0)
+			_ArrayDelete($saved_pages_arr, _ArraySearch($saved_pages_arr, "Main"))
+			_ArraySort($saved_pages_arr)
 
 			if GUICtrlRead($refresh_pages_no_posts_checkbox) = $GUI_UNCHECKED Then
 				; clear the when and messages for all facebook pages in the ini file
-				Global $saved_pages_arr = IniReadSectionNames(@ScriptDir & "\" & $ini_filename)
-				_ArrayDelete($saved_pages_arr, 0)
-				_ArrayDelete($saved_pages_arr, _ArraySearch($saved_pages_arr, "Main"))
-				_ArraySort($saved_pages_arr)
 				for $each in $saved_pages_arr
 					IniWrite(@ScriptDir & "\" & $ini_filename, $each, "when", "")
 					IniWrite(@ScriptDir & "\" & $ini_filename, $each, "message", "")
 				Next
+			Else
+				; clear any uncomplete updates from the agents
+				for $each in $saved_pages_arr
+					Local $when = IniRead(@ScriptDir & "\" & $ini_filename, $each, "when", "")
+					Local $sDecodedText = BinaryToString(IniRead(@ScriptDir & "\" & $ini_filename, $each, "message", ""), 4) ; Convert back to Unicode
+					if $when == "-" Or $sDecodedText == "update in progress by agent ..." Or StringLeft($sDecodedText, 10) == "jq: error:" Then
+						IniWrite(@ScriptDir & "\" & $ini_filename, $each, "when", "")
+						IniWrite(@ScriptDir & "\" & $ini_filename, $each, "message", "")
+						for $i = 0 to _GUICtrlListView_GetItemCount($visible_listview) - 1
+							$item_arr = _GUICtrlListView_GetItemTextArray($visible_listview, $i)
+							if $item_arr[1] == $each Then
+								_GUICtrlListView_SetItemText($visible_listview, $i, "", 2)
+								_GUICtrlListView_SetItemText($visible_listview, $i, "", 3)
+								_GUICtrlListView_SetItemText($hidden_listview, $i, "", 2)
+								_GUICtrlListView_SetItemText($hidden_listview, $i, "", 3)
+							EndIf
+						Next
+					EndIf
+				Next
 			EndIf
-
-			;msgbox(0, "", "")
-
-			;Exit
-
 
 			; update the listviews with the ini file data
 			RefreshListviews()
@@ -175,10 +198,29 @@ While 1
 				Next
 				if $agents_exist = False Then ExitLoop
 				sleep(3000)
-				; update the listviews with the ini file data updated by the agents
-				RefreshListviews()
-			WEnd
 
+				; update the listviews with the ini file data updated by the agents
+
+				for $i = 0 to _GUICtrlListView_GetItemCount($visible_listview) - 1
+					$item_arr = _GUICtrlListView_GetItemTextArray($visible_listview, $i)
+					$when = IniRead(@ScriptDir & "\" & $ini_filename, $item_arr[1], "when", "")
+					Local $sDecodedText = BinaryToString(IniRead(@ScriptDir & "\" & $ini_filename, $item_arr[1], "message", ""), 4) ; Convert back to Unicode
+					$sDecodedText = StringReplace($sDecodedText, @CRLF, " ")
+					$sDecodedText = StringReplace($sDecodedText, @CR, " ")
+					$sDecodedText = StringReplace($sDecodedText, @LF, " ")
+					$sDecodedText = StringReplace($sDecodedText, Chr(10), " ")
+					$sDecodedText = StringRegExpReplace($sDecodedText, "\s+", " ")
+
+					if $item_arr[3] <> $when Then
+						_GUICtrlListView_SetItemText($visible_listview, $i, $when, 2)
+						_GUICtrlListView_SetItemText($hidden_listview, $i, $when, 2)
+					EndIf
+					if $item_arr[4] <> $sDecodedText Then
+						_GUICtrlListView_SetItemText($visible_listview, $i, $sDecodedText, 3)
+						_GUICtrlListView_SetItemText($hidden_listview, $i, $sDecodedText, 3)
+					EndIf
+				Next
+			WEnd
 
 
 		Case $visit_button
@@ -186,6 +228,33 @@ While 1
 			$item_arr = _GUICtrlListView_GetItemTextArray($visible_listview)
 			CreateSession(False, 8674)
 			Navigate($item_arr[2])
+
+			; check if facebook has redirected the browser to "www.facebook.com/login" and if so navigation to the facebook page again
+			$url = _WD_Action(WDSessionFromPromptRemoteDebuggingPort(), "URL")
+			if StringInStr($url, "www.facebook.com/login") > 0 then Navigate($item_arr[2])
+
+		Case $send_to_sheets_button
+
+			Local $header_list = Curl_Slist_Append(0, "Content-Type: application/x-www-form-urlencoded")
+			$payload = "client_id=" & IniRead(@ScriptDir & "\" & $ini_filename, "Main", "GoogleOAuthClientId", "") & "&client_secret=" & IniRead(@ScriptDir & "\" & $ini_filename, "Main", "GoogleOAuthClientSecret", "") & "&refresh_token=" & IniRead(@ScriptDir & "\" & $ini_filename, "Main", "GoogleOAuthRefreshToken", "") & "&grant_type=refresh_token"
+			Local $response = Curl_Post("https://oauth2.googleapis.com/token", $header_list, $payload)
+			Local $access_token = StringRegExp($response, '"access_token": "(.*?)"', 1)
+			ConsoleWrite('@@ Debug(' & @ScriptLineNumber & ') : $access_token[0] = ' & $access_token[0] & @CRLF & '>Error code: ' & @error & @CRLF) ;### Debug Console
+
+			$items_count = _GUICtrlListView_GetItemCount($visible_listview)
+			$sheets_range = "Sheet1!A1:C" & ($items_count + 2)
+			$sheets_json = '{"range": "' & $sheets_range & '", "values": [["As of: ' & DateNow() & '", "' & TimeNow() & '", ""], ["Name", "When", "Message"]'
+			For $i = 0 to $items_count - 1
+				$item_arr = _GUICtrlListView_GetItemTextArray($visible_listview, $i)
+				$sheets_json = $sheets_json & ', ["' & Json_StringEncode($item_arr[1]) & '", "' & Json_StringEncode($item_arr[3]) & '", "' & Json_StringEncode($item_arr[4]) & '"]'
+			Next
+			$sheets_json = $sheets_json & ']}'
+			ConsoleWrite('@@ Debug(' & @ScriptLineNumber & ') : $sheets_json = ' & $sheets_json & @CRLF & '>Error code: ' & @error & @CRLF) ;### Debug Console
+
+			Local $header_list = Curl_Slist_Append(0, "Content-Type: application/json")
+			$header_list = Curl_Slist_Append($header_list, "Authorization: Bearer " & $access_token[0])
+			Local $response = Curl_Put("https://sheets.googleapis.com/v4/spreadsheets/1u5U-qHRRk_OIhM3LuvJDhmkyPPmWjh338mPuQaTTBZw/values/" & $sheets_range & "?valueInputOption=RAW", $header_list, $sheets_json)
+			ConsoleWrite('@@ Debug(' & @ScriptLineNumber & ') : $response = ' & $response & @CRLF & '>Error code: ' & @error & @CRLF) ;### Debug Console
 
 
 		Case $GUI_EVENT_CLOSE
@@ -198,30 +267,24 @@ GUIDelete($hGUI)
 
 
 Func WM_NOTIFY($hWnd, $iMsg, $wParam, $lParam)
-        #forceref $hWnd, $iMsg, $wParam
-        Local $hWndListView = $visible_listview
-        If Not IsHWnd($visible_listview) Then $hWndListView = GUICtrlGetHandle($visible_listview)
+	#forceref $hWnd, $iMsg, $wParam
+	Local $hWndListView = $visible_listview
+	If Not IsHWnd($visible_listview) Then $hWndListView = GUICtrlGetHandle($visible_listview)
 
-        Local $tNMHDR = DllStructCreate($tagNMHDR, $lParam)
-        Local $hWndFrom = HWnd(DllStructGetData($tNMHDR, "hWndFrom"))
-        Local $iCode = DllStructGetData($tNMHDR, "Code")
-        Switch $hWndFrom
-                Case $hWndListView
-                        Switch $iCode
-                              Case $LVN_ITEMCHANGED ; An item has changed
-								  ConsoleWrite('@@ Debug(' & @ScriptLineNumber & ') : $LVN_ITEMCHANGED = ' & $LVN_ITEMCHANGED & @CRLF & '>Error code: ' & @error & @CRLF) ;### Debug Console
-
-								  $arr = _GUICtrlListView_GetItemTextArray($visible_listview)
-								  if $arr[0] > 0 Then
-									GUICtrlSetData($detail_edit, $arr[4])
-									;ConsoleWrite('@@ Debug(' & @ScriptLineNumber & ') : $arr[3] = ' & $arr[3] & @CRLF & '>Error code: ' & @error & @CRLF) ;### Debug Console
-								EndIf
-
-;                                      _WM_NOTIFY_DebugEvent("$LVN_ITEMCHANGED", $tagNMLISTVIEW, $lParam, "IDFrom,,Item,SubItem,NewState,OldState,Changed,ActionX,ActionY,Param")
-                                      ; No return value
-                        EndSwitch
-        EndSwitch
-        Return $GUI_RUNDEFMSG
+	Local $tNMHDR = DllStructCreate($tagNMHDR, $lParam)
+	Local $hWndFrom = HWnd(DllStructGetData($tNMHDR, "hWndFrom"))
+	Local $iCode = DllStructGetData($tNMHDR, "Code")
+	Switch $hWndFrom
+		Case $hWndListView
+			Switch $iCode
+				Case $LVN_ITEMCHANGED ; An item has changed
+					$arr = _GUICtrlListView_GetItemTextArray($visible_listview)
+					if $arr[0] > 0 Then
+						GUICtrlSetData($detail_edit, $arr[4])
+					EndIf
+			EndSwitch
+	EndSwitch
+	Return $GUI_RUNDEFMSG
 EndFunc   ;==>WM_NOTIFY
 
 
@@ -352,3 +415,101 @@ Func TimeAgo($sDateTime)
     EndIf
 EndFunc
 
+
+Func Curl_Post($url, $Slist, $Post = "")
+	Local $Curl = Curl_Easy_Init()
+	If Not $Curl Then Return
+
+	Local $Html = $Curl ; any number as identify
+	Local $Header = $Curl + 1 ; any number as identify
+
+	Curl_Easy_Setopt($Curl, $CURLOPT_URL, $url)
+	Curl_Easy_Setopt($Curl, $CURLOPT_FOLLOWLOCATION, 1)
+	;Curl_Easy_Setopt($Curl, $CURLOPT_PROXY, "127.0.0.1:8888")
+	Curl_Easy_Setopt($Curl, $CURLOPT_WRITEFUNCTION, Curl_DataWriteCallback())
+	Curl_Easy_Setopt($Curl, $CURLOPT_WRITEDATA, $Html)
+	Curl_Easy_Setopt($Curl, $CURLOPT_HEADERFUNCTION, Curl_DataWriteCallback())
+	Curl_Easy_Setopt($Curl, $CURLOPT_HEADERDATA, $Header)
+	Curl_Easy_Setopt($Curl, $CURLOPT_HTTPHEADER, $Slist)
+	Curl_Easy_Setopt($Curl, $CURLOPT_TIMEOUT, 30)
+	Curl_Easy_Setopt($Curl, $CURLOPT_POST, 1)
+	if StringLen($Post) > 0 Then Curl_Easy_Setopt($Curl, $CURLOPT_COPYPOSTFIELDS, $Post)
+
+ 	Curl_Easy_Setopt($Curl, $CURLOPT_SSL_VERIFYPEER, 0)
+
+	Local $Code = Curl_Easy_Perform($Curl)
+	Local $response = ""
+
+	If $Code = $CURLE_OK Then
+ 		$response = BinaryToString(Curl_Data_Get($Html))
+	Else
+		ConsoleWrite(Curl_Easy_StrError($Code) & @LF)
+	EndIf
+
+	Curl_Easy_Cleanup($Curl)
+	Curl_Data_Cleanup($Header)
+	Curl_Data_Cleanup($Html)
+
+	return $response
+EndFunc
+
+Func Curl_Put($url, $Slist, $Post = "")
+	Local $Curl = Curl_Easy_Init()
+	If Not $Curl Then Return
+
+	Local $Html = $Curl ; any number as identify
+	Local $Header = $Curl + 1 ; any number as identify
+
+	Curl_Easy_Setopt($Curl, $CURLOPT_URL, $url)
+	Curl_Easy_Setopt($Curl, $CURLOPT_FOLLOWLOCATION, 1)
+	;Curl_Easy_Setopt($Curl, $CURLOPT_PROXY, "127.0.0.1:8888")
+	Curl_Easy_Setopt($Curl, $CURLOPT_WRITEFUNCTION, Curl_DataWriteCallback())
+	Curl_Easy_Setopt($Curl, $CURLOPT_WRITEDATA, $Html)
+	Curl_Easy_Setopt($Curl, $CURLOPT_HEADERFUNCTION, Curl_DataWriteCallback())
+	Curl_Easy_Setopt($Curl, $CURLOPT_HEADERDATA, $Header)
+	Curl_Easy_Setopt($Curl, $CURLOPT_HTTPHEADER, $Slist)
+	Curl_Easy_Setopt($Curl, $CURLOPT_TIMEOUT, 30)
+	Curl_Easy_Setopt($Curl, $CURLOPT_CUSTOMREQUEST, "PUT")
+
+	if StringLen($Post) > 0 Then
+		Local $JsonBuffer = DllStructCreate("char[" & StringLen($Post) + 1 & "]")  ; Allocates memory
+		DllStructSetData($JsonBuffer, 1, $Post)  ; Stores JSON safely in buffer
+		Curl_Easy_Setopt($Curl, $CURLOPT_POSTFIELDS, DllStructGetPtr($JsonBuffer))  ; Pass clean buffer
+		Curl_Easy_Setopt($Curl, $CURLOPT_POSTFIELDSIZE, StringLen($Post))
+	EndIf
+
+ 	Curl_Easy_Setopt($Curl, $CURLOPT_SSL_VERIFYPEER, 0)
+
+	Local $Code = Curl_Easy_Perform($Curl)
+	Local $response = ""
+
+	If $Code = $CURLE_OK Then
+ 		$response = BinaryToString(Curl_Data_Get($Html))
+	Else
+		ConsoleWrite(Curl_Easy_StrError($Code) & @LF)
+	EndIf
+
+	Curl_Easy_Cleanup($Curl)
+	Curl_Data_Cleanup($Header)
+	Curl_Data_Cleanup($Html)
+
+	return $response
+EndFunc
+
+func DateNow()
+	Local $sMonthNames = "Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec"
+	Local $aMonths = StringSplit($sMonthNames, "|")
+	Return StringFormat("%d %s %d", @MDAY, $aMonths[@MON], @YEAR)
+EndFunc
+
+Func TimeNow()
+	Local $iHour = @HOUR
+	Local $sSuffix = "AM"
+	If $iHour >= 12 Then
+		$sSuffix = "PM"
+		If $iHour > 12 Then $iHour -= 12  ; Convert to 12-hour format
+	ElseIf $iHour = 0 Then
+		$iHour = 12  ; Midnight should be "12 AM"
+	EndIf
+	Return StringFormat("%d:%02d %s", $iHour, @MIN, $sSuffix)
+EndFunc

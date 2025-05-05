@@ -6,33 +6,25 @@
 
 ; ie. 8674
 Local $debugging_port = $CmdLine[1]
+Local $mutex_enabled = True
+Local $headless_browser = True
+
+;Local $debugging_port = 8674
+;Local $mutex_enabled = False
+;Local $headless_browser = False
+
 Local $page_name = ""
 Local $aTimeZone = _Date_Time_GetTimeZoneInformation()
 Local $iOffsetMinutes = -$aTimeZone[1]
 Local $found_empty_message = False
 
-; connect to the mutex handler of facebook-wd-scraper
-$mutex_handle = _WinAPI_OpenMutex($app_name)
-;ConsoleWrite('@@ Debug(' & @ScriptLineNumber & ') : $mutex_handle = ' & $mutex_handle & @CRLF & '>Error code: ' & @error & @CRLF) ;### Debug Console
-if $mutex_handle = 0 then
-	ConsoleWrite("No mutex found, exiting." & @CRLF)
-	Exit
-EndIf
-ConsoleWrite("Mutex found." & @CRLF)
-
-CreateSession(True, $debugging_port)
-;CreateSession(False, $debugging_port)
+if $mutex_enabled = True Then ConnectToMutexHandler()
 
 While True
 
-	; wait for the mutex to be available
-	$mutex_event = _WinAPI_WaitForSingleObject($mutex_handle, 20000)
-	;ConsoleWrite('@@ Debug(' & @ScriptLineNumber & ') : $mutex_event = ' & $mutex_event & @CRLF & '>Error code: ' & @error & @CRLF) ;### Debug Console
-	if $mutex_event <> 0 then
-		ConsoleWrite("Could not get the mutex, exiting." & @CRLF)
-		ExitLoop
+	if $mutex_enabled = True Then
+		if WaitForMutex() = False Then ExitLoop
 	EndIf
-	ConsoleWrite("Got the mutex." & @CRLF)
 
 	; find a facebook post not yet discovered and write a pending update message for that
 	Global $saved_pages_arr = IniReadSectionNames(@ScriptDir & "\" & $ini_filename)
@@ -45,52 +37,58 @@ While True
 		if StringLen($when) = 0 Then
 			$found_empty_message = True
 			$page_name = $each
-			IniWrite(@ScriptDir & "\" & $ini_filename, $page_name, "message", "pending update from agent (PID " & @AutoItPID & ")")
+			IniWrite(@ScriptDir & "\" & $ini_filename, $page_name, "when", "...")
+			IniWrite(@ScriptDir & "\" & $ini_filename, $page_name, "message", "update in progress by agent ...")
+			ConsoleWrite("Page named " & $page_name & " update in progress by agent ..." & @CRLF)
 			ExitLoop
 		EndIf
 	Next
 
-	; release the mutex
-	$result = _WinAPI_ReleaseMutex($mutex_handle)
-	ConsoleWrite("Released the mutex." & @CRLF)
+	if $mutex_enabled = True Then ReleaseTheMutex()
 
 	if $found_empty_message = False Then
 		ConsoleWrite("No more empty messages to scrape, exiting." & @CRLF)
 		ExitLoop
 	EndIf
 
+	if $_WD_REMOTE_DEBUG_PORT = 0 Then CreateSession($headless_browser, $debugging_port)
+
 	; navigate to the facebook page and get the data
 	Navigate(IniRead(@ScriptDir & "\" & $ini_filename, $page_name, "url", ""))
+
+	; check if facebook has redirected the browser to "www.facebook.com/login" and if so navigation to the facebook page again
+	$url = _WD_Action(WDSessionFromPromptRemoteDebuggingPort(), "URL")
+	if StringInStr($url, "www.facebook.com/login") > 0 then Navigate(IniRead(@ScriptDir & "\" & $ini_filename, $page_name, "url", ""))
+
 	$source = _WD_GetSource(WDSessionFromPromptRemoteDebuggingPort())
 	$json = ExtractJson($source)
 	$creation_time = _jqExec($json, '[.. | select(type == "object" and has("creation_time")) | .creation_time] | first')
+	ConsoleWrite('@@ Debug(' & @ScriptLineNumber & ') : $creation_time = ' & $creation_time & @CRLF & '>Error code: ' & @error & @CRLF) ;### Debug Console
 	Local $date = _DateAdd('s', Number($creation_time), "1970/01/01 00:00:00")
 	$date = _DateAdd("n", $iOffsetMinutes, $date)
 	$time_ago = TimeAgo($date)
 	$text = _jqExec($json, '[.. | select(type == "object" and has("text")) | .text] | first')
+	ConsoleWrite('@@ Debug(' & @ScriptLineNumber & ') : $text = ' & $text & @CRLF & '>Error code: ' & @error & @CRLF) ;### Debug Console
 
-	; wait for the mutex to be available
-	$mutex_event = _WinAPI_WaitForSingleObject($mutex_handle, 20000)
-	;ConsoleWrite('@@ Debug(' & @ScriptLineNumber & ') : $mutex_event = ' & $mutex_event & @CRLF & '>Error code: ' & @error & @CRLF) ;### Debug Console
-	if $mutex_event <> 0 then
-		ConsoleWrite("Could not get the mutex, exiting." & @CRLF)
-		ExitLoop
+	if $mutex_enabled = True Then
+		if WaitForMutex() = False Then ExitLoop
 	EndIf
-	ConsoleWrite("Got the mutex." & @CRLF)
 
 	; update the ini file
-	if StringLen($creation_time) > 0 Then
+	if StringLen($creation_time) = 0 Then
+		IniWrite(@ScriptDir & "\" & $ini_filename, $page_name, "when", "-")
+	Else
 		IniWrite(@ScriptDir & "\" & $ini_filename, $page_name, "when", $time_ago)
 	EndIf
-	if StringLen($text) > 0 Then
+	if StringLen($text) = 0 Then
+		IniWrite(@ScriptDir & "\" & $ini_filename, $page_name, "message", StringToBinary("No post found.", 4))
+	Else
 		$text = StringReplace(StringReplace($text, @LF, " "), @CRLF, " ")
 		Local $sUTF8Text = StringToBinary($text, 4) ; Convert to UTF-8
 		IniWrite(@ScriptDir & "\" & $ini_filename, $page_name, "message", $sUTF8Text)
 	EndIf
 
-	; release the mutex
-	$result = _WinAPI_ReleaseMutex($mutex_handle)
-	ConsoleWrite("Released the mutex." & @CRLF)
+	if $mutex_enabled = True Then ReleaseTheMutex()
 WEnd
 
 ConsoleWrite("Detaching session..." & @CRLF)
